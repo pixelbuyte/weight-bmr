@@ -474,7 +474,8 @@ function AvatarScene({
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<THREE.Group | null>(null);
-  const muscleRefs = useRef<THREE.Mesh[]>([]);
+  const morphRefs = useRef<Record<string, THREE.Mesh>>({});
+  const muscleRefs = useRef<Array<{ mesh: THREE.Mesh; baseScale: THREE.Vector3 }>>([]);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -483,35 +484,50 @@ function AvatarScene({
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(0x071019, 8, 16);
 
-    const camera = new THREE.PerspectiveCamera(38, mount.clientWidth / mount.clientHeight, 0.1, 100);
-    camera.position.set(0, 1.65, 7.2);
+    const camera = new THREE.PerspectiveCamera(36, mount.clientWidth / mount.clientHeight, 0.1, 100);
+    camera.position.set(0, 1.35, 7.4);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     mount.appendChild(renderer.domElement);
 
-    const ambient = new THREE.AmbientLight(0x8eeeff, 1.4);
-    const key = new THREE.DirectionalLight(0xffffff, 2.3);
-    key.position.set(2.6, 4.8, 4.2);
+    const ambient = new THREE.AmbientLight(0xa9f4ff, 1.15);
+    const key = new THREE.DirectionalLight(0xffffff, 2.45);
+    key.position.set(2.8, 5.2, 4.6);
+    key.castShadow = true;
     const rim = new THREE.PointLight(0x00e5ff, 42, 9);
     rim.position.set(-2.6, 2.2, 3.5);
-    scene.add(ambient, key, rim);
+    const fill = new THREE.PointLight(0x2d70ff, 18, 7);
+    fill.position.set(2.9, -0.4, 3.2);
+    scene.add(ambient, key, rim, fill);
 
     const grid = new THREE.GridHelper(6.5, 24, 0x00e5ff, 0x12314a);
-    grid.position.y = -1.65;
+    grid.position.y = -2.42;
     grid.material.opacity = 0.22;
     grid.material.transparent = true;
     scene.add(grid);
 
     const avatar = new THREE.Group();
+    morphRefs.current = {};
+    muscleRefs.current = [];
+
     const skin = new THREE.MeshStandardMaterial({
-      color: 0x8bb7c7,
-      metalness: 0.18,
-      roughness: 0.48,
-      emissive: 0x071928,
-      emissiveIntensity: 0.32,
+      color: 0x92bac8,
+      metalness: 0.16,
+      roughness: 0.42,
+      emissive: 0x061722,
+      emissiveIntensity: 0.26,
+    });
+    const contour = new THREE.MeshStandardMaterial({
+      color: 0x6d92a2,
+      metalness: 0.2,
+      roughness: 0.38,
+      emissive: 0x04111a,
+      emissiveIntensity: 0.22,
     });
     const muscle = new THREE.MeshStandardMaterial({
       color: 0x1ee7ff,
@@ -519,55 +535,126 @@ function AvatarScene({
       roughness: 0.22,
       emissive: 0x00d9ff,
       emissiveIntensity: 0.9,
+      transparent: true,
+      opacity: 0.65,
+    });
+    const dark = new THREE.MeshStandardMaterial({
+      color: 0x06111b,
+      metalness: 0.18,
+      roughness: 0.5,
+      emissive: 0x00d9ff,
+      emissiveIntensity: 0.08,
     });
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.72, 1.45, 8, 24), skin);
-    torso.name = 'torso';
-    torso.position.y = 0.25;
-    avatar.add(torso);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 32, 24), skin);
-    head.name = 'head';
-    head.position.y = 1.55;
-    avatar.add(head);
-
-    const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.58, 32, 18), skin);
-    pelvis.name = 'pelvis';
-    pelvis.position.y = -0.73;
-    pelvis.scale.set(1.12, 0.55, 0.72);
-    avatar.add(pelvis);
-
-    const makeLimb = (name: string, x: number, y: number, z: number, radius: number, length: number, rotZ = 0) => {
-      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 8, 18), skin);
+    const addPart = (name: string, mesh: THREE.Mesh) => {
       mesh.name = name;
-      mesh.position.set(x, y, z);
-      mesh.rotation.z = rotZ;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       avatar.add(mesh);
+      morphRefs.current[name] = mesh;
       return mesh;
     };
 
-    makeLimb('leftArm', -0.95, 0.38, 0, 0.16, 1.2, -0.16);
-    makeLimb('rightArm', 0.95, 0.38, 0, 0.16, 1.2, 0.16);
-    makeLimb('leftLeg', -0.34, -1.7, 0, 0.19, 1.55, 0.04);
-    makeLimb('rightLeg', 0.34, -1.7, 0, 0.19, 1.55, -0.04);
-
-    const makeMuscle = (x: number, y: number, sx: number, sy: number) => {
-      const pad = new THREE.Mesh(new THREE.SphereGeometry(0.16, 24, 16), muscle);
-      pad.position.set(x, y, 0.55);
-      pad.scale.set(sx, sy, 0.22);
-      avatar.add(pad);
-      muscleRefs.current.push(pad);
+    const capsule = (
+      name: string,
+      radius: number,
+      length: number,
+      position: [number, number, number],
+      rotation: [number, number, number],
+      material: THREE.Material = skin,
+    ) => {
+      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 12, 28), material);
+      mesh.position.set(...position);
+      mesh.rotation.set(...rotation);
+      return addPart(name, mesh);
     };
 
-    muscleRefs.current = [];
-    makeMuscle(-0.32, 0.65, 1.25, 1.75);
-    makeMuscle(0.32, 0.65, 1.25, 1.75);
-    makeMuscle(-0.52, -0.95, 1.4, 1.1);
-    makeMuscle(0.52, -0.95, 1.4, 1.1);
-    makeMuscle(-1.03, 0.55, 0.82, 1.35);
-    makeMuscle(1.03, 0.55, 0.82, 1.35);
+    const sphere = (
+      name: string,
+      radius: number,
+      scale: [number, number, number],
+      position: [number, number, number],
+      material: THREE.Material = skin,
+    ) => {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 36, 24), material);
+      mesh.scale.set(...scale);
+      mesh.position.set(...position);
+      return addPart(name, mesh);
+    };
 
-    avatar.rotation.y = -0.38;
+    const chest = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.46, 1.08, 36, 1), skin);
+    chest.position.y = 0.46;
+    chest.scale.set(1.18, 1, 0.64);
+    addPart('chest', chest);
+
+    const abdomen = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.84, 36, 1), contour);
+    abdomen.position.y = -0.22;
+    abdomen.scale.set(1.08, 1, 0.62);
+    addPart('abdomen', abdomen);
+
+    sphere('pelvis', 0.52, [1.25, 0.58, 0.72], [0, -0.84, 0], contour);
+    capsule('neck', 0.16, 0.2, [0, 1.15, 0], [0, 0, 0], skin);
+    sphere('head', 0.42, [0.86, 1.12, 0.82], [0, 1.62, 0.02], skin);
+    sphere('jaw', 0.27, [0.9, 0.52, 0.72], [0, 1.35, 0.06], skin);
+    sphere('hair', 0.43, [0.9, 0.42, 0.78], [0, 1.88, -0.04], dark);
+
+    sphere('leftShoulder', 0.22, [1.08, 0.9, 0.85], [-0.78, 0.9, 0], skin);
+    sphere('rightShoulder', 0.22, [1.08, 0.9, 0.85], [0.78, 0.9, 0], skin);
+    capsule('leftUpperArm', 0.15, 0.66, [-1.02, 0.45, 0], [0, 0, -0.26], skin);
+    capsule('rightUpperArm', 0.15, 0.66, [1.02, 0.45, 0], [0, 0, 0.26], skin);
+    capsule('leftForearm', 0.13, 0.62, [-1.14, -0.18, 0.02], [0, 0, -0.12], skin);
+    capsule('rightForearm', 0.13, 0.62, [1.14, -0.18, 0.02], [0, 0, 0.12], skin);
+    sphere('leftHand', 0.16, [0.85, 1.15, 0.7], [-1.2, -0.63, 0.04], skin);
+    sphere('rightHand', 0.16, [0.85, 1.15, 0.7], [1.2, -0.63, 0.04], skin);
+
+    capsule('leftThigh', 0.2, 0.82, [-0.34, -1.31, 0], [0, 0, 0.03], skin);
+    capsule('rightThigh', 0.2, 0.82, [0.34, -1.31, 0], [0, 0, -0.03], skin);
+    capsule('leftCalf', 0.16, 0.78, [-0.35, -2.08, 0.02], [0, 0, -0.03], skin);
+    capsule('rightCalf', 0.16, 0.78, [0.35, -2.08, 0.02], [0, 0, 0.03], skin);
+    sphere('leftFoot', 0.18, [0.95, 0.45, 1.7], [-0.36, -2.55, 0.24], skin);
+    sphere('rightFoot', 0.18, [0.95, 0.45, 1.7], [0.36, -2.55, 0.24], skin);
+
+    const eyeGeometry = new THREE.SphereGeometry(0.035, 16, 10);
+    const leftEye = new THREE.Mesh(eyeGeometry, dark);
+    leftEye.position.set(-0.13, 1.66, 0.36);
+    leftEye.scale.set(1, 0.58, 0.34);
+    avatar.add(leftEye);
+
+    const rightEye = leftEye.clone();
+    rightEye.position.x = 0.13;
+    avatar.add(rightEye);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.16, 18), skin);
+    nose.position.set(0, 1.56, 0.39);
+    nose.rotation.x = Math.PI / 2;
+    nose.castShadow = true;
+    avatar.add(nose);
+
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.018, 0.018), dark);
+    mouth.position.set(0, 1.43, 0.39);
+    avatar.add(mouth);
+
+    const makeMuscle = (x: number, y: number, z: number, sx: number, sy: number, sz = 0.18) => {
+      const pad = new THREE.Mesh(new THREE.SphereGeometry(0.15, 28, 18), muscle);
+      pad.position.set(x, y, z);
+      pad.scale.set(sx, sy, sz);
+      pad.castShadow = true;
+      avatar.add(pad);
+      muscleRefs.current.push({ mesh: pad, baseScale: pad.scale.clone() });
+    };
+
+    makeMuscle(-0.28, 0.64, 0.42, 1.15, 1.25);
+    makeMuscle(0.28, 0.64, 0.42, 1.15, 1.25);
+    makeMuscle(0, 0.03, 0.4, 1.35, 2.1, 0.12);
+    makeMuscle(-0.78, 0.83, 0.25, 0.8, 0.95, 0.14);
+    makeMuscle(0.78, 0.83, 0.25, 0.8, 0.95, 0.14);
+    makeMuscle(-0.99, 0.2, 0.28, 0.68, 1.1, 0.13);
+    makeMuscle(0.99, 0.2, 0.28, 0.68, 1.1, 0.13);
+    makeMuscle(-0.32, -1.33, 0.26, 0.92, 1.45, 0.14);
+    makeMuscle(0.32, -1.33, 0.26, 0.92, 1.45, 0.14);
+
+    avatar.position.y = 0.22;
+    avatar.rotation.y = -0.34;
     bodyRef.current = avatar;
     scene.add(avatar);
 
@@ -586,9 +673,9 @@ function AvatarScene({
     let frame = 0;
     const animate = () => {
       frame = requestAnimationFrame(animate);
-      avatar.rotation.y += 0.004;
-      muscleRefs.current.forEach((mesh, index) => {
-        mesh.scale.z = 0.22 + Math.sin(Date.now() * 0.002 + index) * 0.03;
+      avatar.rotation.y += 0.003;
+      muscleRefs.current.forEach(({ mesh, baseScale }, index) => {
+        mesh.scale.z = baseScale.z + Math.sin(Date.now() * 0.002 + index) * 0.035;
       });
       renderer.render(scene, camera);
     };
@@ -615,15 +702,35 @@ function AvatarScene({
   useEffect(() => {
     if (!bodyRef.current) return;
 
-    const bmiScale = !bmi ? 1 : bmi < 18.5 ? 0.82 : bmi < 25 ? 0.96 : bmi < 30 ? 1.12 : 1.3;
-    const athleticScale = activityIntensity > 0.55 ? 1 + activityIntensity * 0.12 : 1;
-    bodyRef.current.scale.set(bmiScale * athleticScale, 1, Math.max(0.82, bmiScale * 0.92));
-    muscleRefs.current.forEach((mesh) => {
+    const bmiWidth = !bmi ? 1 : bmi < 18.5 ? 0.82 : bmi < 25 ? 0.96 : bmi < 30 ? 1.1 : 1.28;
+    const bmiDepth = !bmi ? 1 : bmi < 18.5 ? 0.84 : bmi < 25 ? 0.96 : bmi < 30 ? 1.16 : 1.36;
+    const athleticWidth = activityIntensity > 0.55 ? 1 + activityIntensity * 0.08 : 1;
+    bodyRef.current.scale.set(bmiWidth * athleticWidth, bmi < 18.5 ? 1.04 : 1, bmiDepth);
+
+    const chest = morphRefs.current.chest;
+    const abdomen = morphRefs.current.abdomen;
+    const pelvis = morphRefs.current.pelvis;
+
+    if (chest) {
+      chest.scale.set(1.18 + activityIntensity * 0.14, 1, 0.64 + Math.max(0, bmiWidth - 1) * 0.12);
+    }
+    if (abdomen) {
+      abdomen.scale.set(
+        bmi >= 30 ? 1.3 : bmi >= 25 ? 1.17 : bmi < 18.5 ? 0.92 : 1.03,
+        1,
+        bmi >= 30 ? 0.84 : bmi >= 25 ? 0.72 : 0.62,
+      );
+    }
+    if (pelvis) {
+      pelvis.scale.set(bmi >= 30 ? 1.44 : bmi >= 25 ? 1.34 : 1.2, 0.58, bmi >= 25 ? 0.82 : 0.72);
+    }
+
+    muscleRefs.current.forEach(({ mesh }) => {
       const material = mesh.material as THREE.MeshStandardMaterial;
       material.opacity = 0.35 + activityIntensity * 0.65;
       material.transparent = true;
       material.emissiveIntensity = 0.25 + activityIntensity * 1.8;
-      mesh.visible = activityIntensity > 0.18;
+      mesh.visible = activityIntensity > 0.16;
     });
   }, [activityIntensity, bmi]);
 
