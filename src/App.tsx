@@ -7,6 +7,12 @@ type UnitSystem = 'metric' | 'imperial';
 type ActivityKey = 'sedentary' | 'light' | 'moderate' | 'very' | 'athlete';
 type BmiCategory = 'slim' | 'athletic' | 'average' | 'heavier';
 
+type BodyMeasurement = {
+  label: string;
+  cm: number;
+  note: string;
+};
+
 const activityLevels: Array<{
   key: ActivityKey;
   label: string;
@@ -81,8 +87,103 @@ function calculateBmr(weightKg: number, heightCm: number, age: number, gender: G
   return gender === 'male' ? maleBmr : maleBmr - femaleAdjustment;
 }
 
+function estimateMeasurements({
+  heightCm,
+  weightKg,
+  gender,
+  bmi,
+  activityFactor,
+}: {
+  heightCm: number;
+  weightKg: number;
+  gender: Gender;
+  bmi: number;
+  activityFactor: number;
+}) {
+  const buildRatio = weightKg / heightCm;
+  const activityBoost = (activityFactor - 1.2) * 4.5;
+  const bmiBoost = Math.max(-5, Math.min(8, bmi - 22));
+  const genderChestBias = gender === 'male' ? 7 : 0;
+  const genderHipBias = gender === 'female' ? 7 : 2;
+  const waist = heightCm * 0.43 + buildRatio * 42 + bmiBoost * 0.7;
+  const chest = heightCm * 0.49 + buildRatio * 33 + activityBoost + genderChestBias;
+  const hips = heightCm * 0.48 + buildRatio * 36 + bmiBoost * 0.55 + genderHipBias;
+  const shoulders = heightCm * 0.255 + activityBoost * 0.45 + (gender === 'male' ? 4 : 1.5);
+  const thigh = heightCm * 0.27 + buildRatio * 15 + activityBoost * 0.45;
+  const arm = heightCm * 0.145 + buildRatio * 9 + activityBoost * 0.55;
+  const neck = heightCm * 0.185 + buildRatio * 7 + (gender === 'male' ? 2.4 : 0.8);
+
+  return [
+    { label: 'Chest', cm: chest },
+    { label: 'Waist', cm: waist },
+    { label: 'Hips', cm: hips },
+    { label: 'Shoulders', cm: shoulders },
+    { label: 'Arm', cm: arm },
+    { label: 'Thigh', cm: thigh },
+    { label: 'Neck', cm: neck },
+  ];
+}
+
 function formatNumber(value: number, suffix = '') {
   return `${Math.round(value).toLocaleString()}${suffix}`;
+}
+
+function formatMeasurement(cm: number, unitSystem: UnitSystem) {
+  if (unitSystem === 'metric') return `${cm.toFixed(1)} cm`;
+  return `${cmToIn(cm).toFixed(1)} in`;
+}
+
+function estimateBodyMeasurements({
+  activityFactor,
+  bmi,
+  gender,
+  heightCm,
+  weightKg,
+}: {
+  activityFactor: number;
+  bmi: number;
+  gender: Gender;
+  heightCm: number;
+  weightKg: number;
+}): BodyMeasurement[] {
+  const leanBias = Math.min(1.08, Math.max(0.88, 1 + (activityFactor - 1.45) * 0.12));
+  const massIndex = Math.sqrt(weightKg / 78);
+  const bmiBias = Math.min(1.18, Math.max(0.86, 1 + (bmi - 23) * 0.018));
+  const genderChestBias = gender === 'male' ? 1.04 : 0.98;
+  const genderHipBias = gender === 'male' ? 0.97 : 1.05;
+
+  return [
+    {
+      label: 'Chest',
+      cm: heightCm * 0.53 * massIndex * genderChestBias * leanBias,
+      note: 'Upper torso estimate',
+    },
+    {
+      label: 'Waist',
+      cm: heightCm * 0.43 * bmiBias * (gender === 'male' ? 1.02 : 0.96),
+      note: 'Core circumference',
+    },
+    {
+      label: 'Hips',
+      cm: heightCm * 0.52 * massIndex * genderHipBias,
+      note: 'Lower torso estimate',
+    },
+    {
+      label: 'Shoulders',
+      cm: heightCm * 0.255 * (gender === 'male' ? 1.06 : 0.98) * leanBias,
+      note: 'Biacromial width',
+    },
+    {
+      label: 'Upper arm',
+      cm: heightCm * 0.17 * massIndex * leanBias,
+      note: 'Flexed circumference',
+    },
+    {
+      label: 'Thigh',
+      cm: heightCm * 0.31 * massIndex * (0.96 + (activityFactor - 1.2) * 0.08),
+      note: 'Mid-thigh circumference',
+    },
+  ];
 }
 
 function AvatarCanvas({

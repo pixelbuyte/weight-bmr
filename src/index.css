@@ -66,3 +66,47 @@ select {
   opacity: 0.65;
   pointer-events: none;
 }
+
+.hologram-stage {
+  background:
+    linear-gradient(rgba(103, 232, 249, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103, 232, 249, 0.025) 1px, transparent 1px),
+    radial-gradient(circle at 50% 8%, rgba(34, 211, 238, 0.2), transparent 34%),
+    linear-gradient(180deg, rgba(4, 12, 28, 0.96), rgba(1, 7, 18, 0.96));
+  background-size: 28px 28px, 28px 28px, auto, auto;
+}
+
+.hologram-stage::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(103, 232, 249, 0.1) 48%,
+    transparent 52%,
+    transparent 100%
+  );
+  animation: scanline 3.6s linear infinite;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.hologram-stage::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: radial-gradient(circle at center, transparent 34%, rgba(0, 229, 255, 0.08), transparent 72%);
+  box-shadow: inset 0 0 70px rgba(34, 211, 238, 0.14);
+  pointer-events: none;
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+
+  100% {
+    transform: translateY(100%);
+  }
+}
