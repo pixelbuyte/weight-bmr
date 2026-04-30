@@ -87,43 +87,6 @@ function calculateBmr(weightKg: number, heightCm: number, age: number, gender: G
   return gender === 'male' ? maleBmr : maleBmr - femaleAdjustment;
 }
 
-function estimateMeasurements({
-  heightCm,
-  weightKg,
-  gender,
-  bmi,
-  activityFactor,
-}: {
-  heightCm: number;
-  weightKg: number;
-  gender: Gender;
-  bmi: number;
-  activityFactor: number;
-}) {
-  const buildRatio = weightKg / heightCm;
-  const activityBoost = (activityFactor - 1.2) * 4.5;
-  const bmiBoost = Math.max(-5, Math.min(8, bmi - 22));
-  const genderChestBias = gender === 'male' ? 7 : 0;
-  const genderHipBias = gender === 'female' ? 7 : 2;
-  const waist = heightCm * 0.43 + buildRatio * 42 + bmiBoost * 0.7;
-  const chest = heightCm * 0.49 + buildRatio * 33 + activityBoost + genderChestBias;
-  const hips = heightCm * 0.48 + buildRatio * 36 + bmiBoost * 0.55 + genderHipBias;
-  const shoulders = heightCm * 0.255 + activityBoost * 0.45 + (gender === 'male' ? 4 : 1.5);
-  const thigh = heightCm * 0.27 + buildRatio * 15 + activityBoost * 0.45;
-  const arm = heightCm * 0.145 + buildRatio * 9 + activityBoost * 0.55;
-  const neck = heightCm * 0.185 + buildRatio * 7 + (gender === 'male' ? 2.4 : 0.8);
-
-  return [
-    { label: 'Chest', cm: chest },
-    { label: 'Waist', cm: waist },
-    { label: 'Hips', cm: hips },
-    { label: 'Shoulders', cm: shoulders },
-    { label: 'Arm', cm: arm },
-    { label: 'Thigh', cm: thigh },
-    { label: 'Neck', cm: neck },
-  ];
-}
-
 function formatNumber(value: number, suffix = '') {
   return `${Math.round(value).toLocaleString()}${suffix}`;
 }
@@ -198,40 +161,54 @@ function AvatarCanvas({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const figureRef = useRef<THREE.Group | null>(null);
   const muscleRefs = useRef<THREE.Mesh[]>([]);
+  const hologramRefs = useRef<THREE.Object3D[]>([]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(42, host.clientWidth / host.clientHeight, 0.1, 100);
-    camera.position.set(0, 1.2, 7);
+    const camera = new THREE.PerspectiveCamera(36, host.clientWidth / host.clientHeight, 0.1, 100);
+    camera.position.set(0, 0.65, 7.4);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(host.clientWidth, host.clientHeight);
+    renderer.setClearColor(0x000000, 0);
     host.appendChild(renderer.domElement);
 
-    const ambientLight = new THREE.AmbientLight(0x9bdcff, 1.8);
-    const keyLight = new THREE.PointLight(0x22d3ee, 16, 18);
-    keyLight.position.set(3, 4, 5);
-    const rimLight = new THREE.PointLight(0x2563eb, 12, 15);
-    rimLight.position.set(-4, 2, -2);
-    scene.add(ambientLight, keyLight, rimLight);
+    const ambientLight = new THREE.AmbientLight(0x9bdcff, 2.4);
+    const chestLight = new THREE.PointLight(0x7df9ff, 28, 10);
+    chestLight.position.set(0, 0.95, 1.8);
+    const rimLight = new THREE.PointLight(0x22d3ee, 24, 14);
+    rimLight.position.set(-3.5, 2.5, 2);
+    scene.add(ambientLight, chestLight, rimLight);
 
     const figure = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x10223d,
-      roughness: 0.34,
-      metalness: 0.2,
-      emissive: 0x06111f,
+      color: 0x8ffaff,
+      emissive: 0x0ea5b7,
+      emissiveIntensity: 0.72,
+      metalness: 0.05,
+      opacity: 0.22,
+      roughness: 0.1,
+      transparent: true,
+      depthWrite: false,
     });
     const accentMaterial = new THREE.MeshStandardMaterial({
-      color: 0x67e8f9,
-      roughness: 0.18,
-      metalness: 0.15,
-      emissive: 0x0891b2,
-      emissiveIntensity: 1.2,
+      color: 0xb8fdff,
+      emissive: 0x67e8f9,
+      emissiveIntensity: 2.4,
+      opacity: 0.74,
+      transparent: true,
+      depthWrite: false,
+    });
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xa7fbff, transparent: true, opacity: 0.74 });
+    const wireMaterial = new THREE.MeshBasicMaterial({
+      color: 0x8ffaff,
+      opacity: 0.22,
+      transparent: true,
+      wireframe: true,
     });
 
     const makeCapsule = (radius: number, length: number, position: [number, number, number], scale = 1) => {
@@ -239,20 +216,33 @@ function AvatarCanvas({
       mesh.position.set(...position);
       mesh.scale.setScalar(scale);
       figure.add(mesh);
+      const wire = new THREE.Mesh(mesh.geometry, wireMaterial);
+      wire.position.copy(mesh.position);
+      wire.rotation.copy(mesh.rotation);
+      wire.scale.copy(mesh.scale).multiplyScalar(1.012);
+      figure.add(wire);
+      hologramRefs.current.push(wire);
       return mesh;
     };
 
-    const torso = makeCapsule(0.66, 1.42, [0, 0.8, 0]);
+    const torso = makeCapsule(0.58, 1.58, [0, 0.72, 0]);
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 40, 40), bodyMaterial);
-    head.position.set(0, 2.04, 0);
+    head.position.set(0, 1.98, 0);
     figure.add(head);
+    const headWire = new THREE.Mesh(head.geometry, wireMaterial);
+    headWire.position.copy(head.position);
+    headWire.scale.setScalar(1.015);
+    figure.add(headWire);
+    hologramRefs.current.push(headWire);
 
-    const leftArm = makeCapsule(0.16, 1.34, [-0.88, 0.75, 0], 1);
-    leftArm.rotation.z = -0.24;
-    const rightArm = makeCapsule(0.16, 1.34, [0.88, 0.75, 0], 1);
-    rightArm.rotation.z = 0.24;
-    const leftLeg = makeCapsule(0.2, 1.55, [-0.32, -1.0, 0], 1);
-    const rightLeg = makeCapsule(0.2, 1.55, [0.32, -1.0, 0], 1);
+    const leftArm = makeCapsule(0.15, 1.48, [-0.84, 0.62, 0], 1);
+    leftArm.rotation.z = -0.18;
+    const rightArm = makeCapsule(0.15, 1.48, [0.84, 0.62, 0], 1);
+    rightArm.rotation.z = 0.18;
+    const leftLeg = makeCapsule(0.18, 1.68, [-0.29, -1.08, 0], 1);
+    leftLeg.rotation.z = 0.05;
+    const rightLeg = makeCapsule(0.18, 1.68, [0.29, -1.08, 0], 1);
+    rightLeg.rotation.z = -0.05;
 
     const muscleZones = [
       [-0.26, 1.08, 0.6, 0.18, 0.44],
@@ -270,21 +260,70 @@ function AvatarCanvas({
       return zone;
     });
 
+    const makeLine = (points: Array<[number, number, number]>) => {
+      const geometry = new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(...point)));
+      const line = new THREE.Line(geometry, lineMaterial.clone());
+      figure.add(line);
+      hologramRefs.current.push(line);
+      return line;
+    };
+
+    [
+      [[0, 1.55, 0.62], [0, 0.85, 0.72], [0, -0.18, 0.62]],
+      [[-0.42, 1.24, 0.62], [0, 0.86, 0.74], [0.42, 1.24, 0.62]],
+      [[-0.36, 0.42, 0.7], [0, 0.08, 0.76], [0.36, 0.42, 0.7]],
+      [[-0.78, 0.96, 0.25], [-0.35, 0.84, 0.68], [-0.12, 0.28, 0.72]],
+      [[0.78, 0.96, 0.25], [0.35, 0.84, 0.68], [0.12, 0.28, 0.72]],
+      [[-0.24, -0.2, 0.58], [-0.42, -0.92, 0.36], [-0.32, -1.76, 0.24]],
+      [[0.24, -0.2, 0.58], [0.42, -0.92, 0.36], [0.32, -1.76, 0.24]],
+    ].forEach((path) => makeLine(path as Array<[number, number, number]>));
+
+    const chestCore = new THREE.Mesh(new THREE.SphereGeometry(0.11, 32, 32), accentMaterial.clone());
+    chestCore.position.set(0, 1.05, 0.72);
+    figure.add(chestCore);
+    const coreHalo = new THREE.Mesh(
+      new THREE.RingGeometry(0.18, 0.38, 80),
+      new THREE.MeshBasicMaterial({ color: 0xb8fdff, transparent: true, opacity: 0.52, side: THREE.DoubleSide }),
+    );
+    coreHalo.position.copy(chestCore.position);
+    figure.add(coreHalo);
+    hologramRefs.current.push(chestCore, coreHalo);
+
     const base = new THREE.Mesh(
-      new THREE.TorusGeometry(1.35, 0.018, 16, 120),
-      new THREE.MeshBasicMaterial({ color: 0x0891b2, transparent: true, opacity: 0.72 }),
+      new THREE.TorusGeometry(1.35, 0.012, 16, 160),
+      new THREE.MeshBasicMaterial({ color: 0x7df9ff, transparent: true, opacity: 0.82 }),
     );
     base.position.y = -2.02;
     base.rotation.x = Math.PI / 2;
     figure.add(base);
+    const scanRings = [0.72, 1.02, 1.32].map((scale, index) => {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(scale, 0.006, 12, 120),
+        new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.24 - index * 0.04 }),
+      );
+      ring.position.y = -1.92 + index * 0.09;
+      ring.rotation.x = Math.PI / 2;
+      figure.add(ring);
+      return ring;
+    });
+    hologramRefs.current.push(base, ...scanRings);
 
     figureRef.current = figure;
     scene.add(figure);
 
     let animationId = 0;
+    let elapsed = 0;
     const render = () => {
       animationId = window.requestAnimationFrame(render);
-      figure.rotation.y += 0.006;
+      elapsed += 0.016;
+      figure.rotation.y = Math.sin(elapsed * 0.45) * 0.13;
+      chestCore.scale.setScalar(1 + Math.sin(elapsed * 4.2) * 0.22);
+      coreHalo.rotation.z += 0.018;
+      coreHalo.scale.setScalar(1 + Math.sin(elapsed * 2.8) * 0.16);
+      scanRings.forEach((ring, index) => {
+        ring.position.y = -1.98 + ((elapsed * 0.32 + index * 0.32) % 1.1);
+        ring.scale.setScalar(0.84 + Math.sin(elapsed * 1.4 + index) * 0.08);
+      });
       renderer.render(scene, camera);
     };
 
@@ -304,7 +343,7 @@ function AvatarCanvas({
       resizeObserver.disconnect();
       host.removeChild(renderer.domElement);
       renderer.dispose();
-      [torso, head, leftArm, rightArm, leftLeg, rightLeg, base, ...muscleRefs.current].forEach((mesh) => {
+      [torso, head, leftArm, rightArm, leftLeg, rightLeg, base, ...scanRings, ...muscleRefs.current].forEach((mesh) => {
         mesh.geometry.dispose();
         if (Array.isArray(mesh.material)) {
           mesh.material.forEach((material) => material.dispose());
@@ -312,6 +351,18 @@ function AvatarCanvas({
           mesh.material.dispose();
         }
       });
+      hologramRefs.current.forEach((object) => {
+        if ('geometry' in object && object.geometry instanceof THREE.BufferGeometry) object.geometry.dispose();
+        if ('material' in object) {
+          const material = object.material;
+          if (Array.isArray(material)) {
+            material.forEach((item) => item.dispose());
+          } else if (material instanceof THREE.Material) {
+            material.dispose();
+          }
+        }
+      });
+      hologramRefs.current = [];
     };
   }, []);
 
@@ -339,12 +390,13 @@ function AvatarCanvas({
   }, [activityFactor, category, bmi]);
 
   return (
-    <div className="relative h-[360px] overflow-hidden rounded-[2rem] border border-cyan-300/10 bg-[#06101f]/80 sm:h-[500px]">
+    <div className="hologram-stage relative h-[420px] overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-[#06101f]/80 sm:h-[560px]">
       <div className="orb left-4 top-6 h-32 w-32 bg-cyan-400/30" />
       <div className="orb bottom-8 right-8 h-44 w-44 bg-blue-600/30" />
+      <div className="hologram-floor" />
       <div ref={hostRef} className="absolute inset-0" aria-label="3D body avatar preview" />
       <div className="absolute left-5 top-5 rounded-full border border-cyan-300/20 bg-black/24 px-4 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-100">
-        Live avatar
+        Hologram scan
       </div>
       <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur">
         <div className="flex items-center justify-between gap-3">
@@ -364,6 +416,7 @@ function AvatarCanvas({
 
 function App() {
   const [state, setState] = useState(initialState);
+  const [bodyMeasurements, setBodyMeasurements] = useState<BodyMeasurement[] | null>(null);
 
   const activeLevel = activityLevels.find((level) => level.key === state.activity) ?? activityLevels[0];
   const heightDisplay = state.unitSystem === 'metric' ? state.heightCm : cmToIn(state.heightCm);
@@ -415,6 +468,18 @@ function App() {
       ...current,
       weightKg: current.unitSystem === 'metric' ? numeric : lbToKg(numeric),
     }));
+  };
+
+  const generateMeasurements = () => {
+    setBodyMeasurements(
+      estimateBodyMeasurements({
+        activityFactor: activeLevel.factor,
+        bmi: calculations.bmi,
+        gender: state.gender,
+        heightCm: state.heightCm,
+        weightKg: state.weightKg,
+      }),
+    );
   };
 
   return (
@@ -598,6 +663,42 @@ function App() {
                     <span className="sr-only">Toggle keto mode</span>
                   </button>
                 </div>
+              </div>
+              <div className="mt-6 rounded-3xl border border-cyan-300/20 bg-cyan-300/[0.045] p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-[0.24em] text-cyan-200/80">Body scan</p>
+                    <h3 className="font-display text-2xl font-semibold text-white">Generate measurements</h3>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Enter height, weight, age, gender, and activity, then scan estimated body measurements.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-full bg-cyan-300 px-6 py-3 text-sm font-bold uppercase tracking-[0.18em] text-slate-950 shadow-[0_0_32px_rgba(34,211,238,0.45)] transition hover:-translate-y-0.5 hover:bg-white"
+                    onClick={generateMeasurements}
+                  >
+                    Generate
+                  </button>
+                </div>
+                {bodyMeasurements && (
+                  <motion.div
+                    className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35 }}
+                  >
+                    {bodyMeasurements.map((measurement) => (
+                      <div key={measurement.label} className="rounded-2xl border border-white/10 bg-black/24 p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{measurement.label}</p>
+                        <p className="mt-2 font-display text-2xl font-semibold text-cyan-100">
+                          {formatMeasurement(measurement.cm, state.unitSystem)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">{measurement.note}</p>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
               </div>
             </motion.div>
 
