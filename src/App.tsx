@@ -89,101 +89,347 @@ function AvatarCanvas({
   bmi,
   category,
   activityFactor,
+  gender,
 }: {
   bmi: number;
   category: BmiCategory;
   activityFactor: number;
+  gender: Gender;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const figureRef = useRef<THREE.Group | null>(null);
   const muscleRefs = useRef<THREE.Mesh[]>([]);
+  const morphPartsRef = useRef<{
+    chest: THREE.Mesh;
+    abdomen: THREE.Mesh;
+    hipBlock: THREE.Mesh;
+    figure: THREE.Group;
+  } | null>(null);
+  const targetMorphRef = useRef({ shoulder: 1, waist: 1, hip: 1, height: 1 });
+  const currentMorphRef = useRef({ shoulder: 1, waist: 1, hip: 1, height: 1 });
+  const activityIntensityRef = useRef(0.5);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(42, host.clientWidth / host.clientHeight, 0.1, 100);
-    camera.position.set(0, 1.2, 7);
+    const camera = new THREE.PerspectiveCamera(40, host.clientWidth / host.clientHeight, 0.1, 100);
+    camera.position.set(0, 0.7, 7.4);
+    camera.lookAt(0, 0.2, 0);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(host.clientWidth, host.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
     host.appendChild(renderer.domElement);
 
-    const ambientLight = new THREE.AmbientLight(0x9bdcff, 1.8);
-    const keyLight = new THREE.PointLight(0x22d3ee, 16, 18);
-    keyLight.position.set(3, 4, 5);
-    const rimLight = new THREE.PointLight(0x2563eb, 12, 15);
-    rimLight.position.set(-4, 2, -2);
-    scene.add(ambientLight, keyLight, rimLight);
+    const hemiLight = new THREE.HemisphereLight(0x9bdcff, 0x05101e, 0.85);
+    const keyLight = new THREE.DirectionalLight(0xa3e8ff, 1.1);
+    keyLight.position.set(4, 6, 5);
+    const rimLight = new THREE.PointLight(0x2563eb, 22, 18, 1.6);
+    rimLight.position.set(-4.5, 2.5, -3);
+    const fillLight = new THREE.PointLight(0x22d3ee, 8, 14, 1.8);
+    fillLight.position.set(2.5, -1.5, 4);
+    scene.add(hemiLight, keyLight, rimLight, fillLight);
 
-    const figure = new THREE.Group();
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x10223d,
-      roughness: 0.34,
-      metalness: 0.2,
+    const skinMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0f2240,
+      roughness: 0.42,
+      metalness: 0.32,
       emissive: 0x06111f,
+      emissiveIntensity: 0.55,
     });
-    const accentMaterial = new THREE.MeshStandardMaterial({
+    const trimMaterial = new THREE.MeshStandardMaterial({
+      color: 0x67e8f9,
+      roughness: 0.2,
+      metalness: 0.55,
+      emissive: 0x0891b2,
+      emissiveIntensity: 1.6,
+      transparent: true,
+      opacity: 0.92,
+    });
+    const muscleMaterialBase = new THREE.MeshStandardMaterial({
       color: 0x67e8f9,
       roughness: 0.18,
       metalness: 0.15,
       emissive: 0x0891b2,
       emissiveIntensity: 1.2,
+      transparent: true,
+      opacity: 0.85,
     });
 
-    const makeCapsule = (radius: number, length: number, position: [number, number, number], scale = 1) => {
-      const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 24, 48), bodyMaterial);
-      mesh.position.set(...position);
-      mesh.scale.setScalar(scale);
-      figure.add(mesh);
+    const disposables: { geometry: THREE.BufferGeometry; material: THREE.Material | THREE.Material[] }[] = [];
+    const trackMesh = <T extends THREE.Mesh>(mesh: T) => {
+      disposables.push({ geometry: mesh.geometry, material: mesh.material });
       return mesh;
     };
 
-    const torso = makeCapsule(0.66, 1.42, [0, 0.8, 0]);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 40, 40), bodyMaterial);
-    head.position.set(0, 2.04, 0);
-    figure.add(head);
+    const figure = new THREE.Group();
 
-    const leftArm = makeCapsule(0.16, 1.34, [-0.88, 0.75, 0], 1);
-    leftArm.rotation.z = -0.24;
-    const rightArm = makeCapsule(0.16, 1.34, [0.88, 0.75, 0], 1);
-    rightArm.rotation.z = 0.24;
-    const leftLeg = makeCapsule(0.2, 1.55, [-0.32, -1.0, 0], 1);
-    const rightLeg = makeCapsule(0.2, 1.55, [0.32, -1.0, 0], 1);
+    const hips = new THREE.Group();
+    figure.add(hips);
 
-    const muscleZones = [
-      [-0.26, 1.08, 0.6, 0.18, 0.44],
-      [0.26, 1.08, 0.6, 0.18, 0.44],
-      [0, 0.54, 0.66, 0.22, 0.36],
-      [-0.33, -0.68, 0.22, 0.16, 0.54],
-      [0.33, -0.68, 0.22, 0.16, 0.54],
-    ] as const;
+    const hipBlock = trackMesh(
+      new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 0.16, 16, 32), skinMaterial),
+    );
+    hipBlock.position.y = -0.15;
+    hipBlock.scale.set(1.05, 1, 0.85);
+    hips.add(hipBlock);
 
-    muscleRefs.current = muscleZones.map(([x, y, z, width, height]) => {
-      const zone = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 24), accentMaterial.clone());
-      zone.position.set(x, y, z);
-      zone.scale.set(width, height, 0.035);
-      figure.add(zone);
+    const torso = new THREE.Group();
+    torso.position.y = 0.05;
+    hips.add(torso);
+
+    const abdomen = trackMesh(
+      new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.36, 16, 32), skinMaterial),
+    );
+    abdomen.position.y = 0.3;
+    abdomen.scale.set(1, 1, 0.78);
+    torso.add(abdomen);
+
+    const chest = trackMesh(
+      new THREE.Mesh(new THREE.CapsuleGeometry(0.56, 0.5, 18, 36), skinMaterial),
+    );
+    chest.position.y = 0.92;
+    chest.scale.set(1, 1, 0.78);
+    torso.add(chest);
+
+    const upperBody = new THREE.Group();
+    upperBody.position.y = 1.18;
+    torso.add(upperBody);
+
+    const shoulderL = trackMesh(
+      new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 24), skinMaterial),
+    );
+    shoulderL.position.set(-0.62, 0, 0);
+    upperBody.add(shoulderL);
+    const shoulderR = trackMesh(
+      new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 24), skinMaterial),
+    );
+    shoulderR.position.set(0.62, 0, 0);
+    upperBody.add(shoulderR);
+
+    const neck = trackMesh(
+      new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.18, 12, 24), skinMaterial),
+    );
+    neck.position.y = 0.18;
+    upperBody.add(neck);
+
+    const head = trackMesh(
+      new THREE.Mesh(new THREE.SphereGeometry(0.32, 36, 36), skinMaterial),
+    );
+    head.position.y = 0.55;
+    head.scale.set(0.92, 1, 0.92);
+    upperBody.add(head);
+
+    const buildArm = (side: -1 | 1) => {
+      const armGroup = new THREE.Group();
+      armGroup.position.set(0.62 * side, 0, 0);
+      armGroup.rotation.z = -0.18 * side;
+      upperBody.add(armGroup);
+
+      const upperArm = trackMesh(
+        new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.6, 14, 24), skinMaterial),
+      );
+      upperArm.position.y = -0.42;
+      armGroup.add(upperArm);
+
+      const elbow = trackMesh(
+        new THREE.Mesh(new THREE.SphereGeometry(0.14, 18, 18), skinMaterial),
+      );
+      elbow.position.y = -0.84;
+      armGroup.add(elbow);
+
+      const forearm = trackMesh(
+        new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.58, 14, 24), skinMaterial),
+      );
+      forearm.position.y = -1.22;
+      armGroup.add(forearm);
+
+      const hand = trackMesh(
+        new THREE.Mesh(new THREE.SphereGeometry(0.13, 18, 18), skinMaterial),
+      );
+      hand.position.y = -1.6;
+      hand.scale.set(0.85, 1.1, 0.65);
+      armGroup.add(hand);
+    };
+    buildArm(-1);
+    buildArm(1);
+
+    const buildLeg = (side: -1 | 1) => {
+      const legGroup = new THREE.Group();
+      legGroup.position.set(0.26 * side, -0.32, 0);
+      hips.add(legGroup);
+
+      const thigh = trackMesh(
+        new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.7, 16, 28), skinMaterial),
+      );
+      thigh.position.y = -0.5;
+      legGroup.add(thigh);
+
+      const knee = trackMesh(
+        new THREE.Mesh(new THREE.SphereGeometry(0.2, 18, 18), skinMaterial),
+      );
+      knee.position.y = -0.96;
+      legGroup.add(knee);
+
+      const calf = trackMesh(
+        new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.66, 16, 28), skinMaterial),
+      );
+      calf.position.y = -1.4;
+      legGroup.add(calf);
+
+      const foot = trackMesh(
+        new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.5), skinMaterial),
+      );
+      foot.position.set(0, -1.86, 0.08);
+      legGroup.add(foot);
+    };
+    buildLeg(-1);
+    buildLeg(1);
+
+    const beltLine = trackMesh(
+      new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.025, 12, 64), trimMaterial),
+    );
+    beltLine.position.y = 0.55;
+    beltLine.rotation.x = Math.PI / 2;
+    beltLine.scale.set(1, 0.78, 1);
+    torso.add(beltLine);
+
+    const collarLine = trackMesh(
+      new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.022, 10, 48, Math.PI), trimMaterial),
+    );
+    collarLine.position.y = 1.16;
+    collarLine.rotation.x = Math.PI / 2;
+    torso.add(collarLine);
+
+    const muscleZones: Array<{
+      position: [number, number, number];
+      scale: [number, number, number];
+      parent: THREE.Object3D;
+    }> = [
+      { position: [-0.27, 0.95, 0.42], scale: [0.22, 0.22, 0.05], parent: torso },
+      { position: [0.27, 0.95, 0.42], scale: [0.22, 0.22, 0.05], parent: torso },
+      { position: [0, 0.4, 0.32], scale: [0.18, 0.34, 0.05], parent: torso },
+      { position: [-0.34, -0.5, 0.18], scale: [0.18, 0.32, 0.05], parent: hips },
+      { position: [0.34, -0.5, 0.18], scale: [0.18, 0.32, 0.05], parent: hips },
+      { position: [-0.66, -0.42, 0.06], scale: [0.12, 0.16, 0.05], parent: upperBody },
+      { position: [0.66, -0.42, 0.06], scale: [0.12, 0.16, 0.05], parent: upperBody },
+    ];
+
+    muscleRefs.current = muscleZones.map(({ position, scale, parent }) => {
+      const mat = muscleMaterialBase.clone();
+      const zone = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 20), mat);
+      zone.position.set(...position);
+      zone.scale.set(...scale);
+      parent.add(zone);
+      disposables.push({ geometry: zone.geometry, material: mat });
       return zone;
     });
 
-    const base = new THREE.Mesh(
-      new THREE.TorusGeometry(1.35, 0.018, 16, 120),
-      new THREE.MeshBasicMaterial({ color: 0x0891b2, transparent: true, opacity: 0.72 }),
+    const outerRing = trackMesh(
+      new THREE.Mesh(
+        new THREE.TorusGeometry(1.45, 0.018, 16, 120),
+        new THREE.MeshBasicMaterial({ color: 0x0891b2, transparent: true, opacity: 0.78 }),
+      ),
     );
-    base.position.y = -2.02;
-    base.rotation.x = Math.PI / 2;
-    figure.add(base);
+    outerRing.position.y = -2.1;
+    outerRing.rotation.x = Math.PI / 2;
+    figure.add(outerRing);
 
-    figureRef.current = figure;
+    const innerRing = trackMesh(
+      new THREE.Mesh(
+        new THREE.TorusGeometry(1.05, 0.012, 12, 90),
+        new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.5 }),
+      ),
+    );
+    innerRing.position.y = -2.08;
+    innerRing.rotation.x = Math.PI / 2;
+    figure.add(innerRing);
+
+    const floorDisc = trackMesh(
+      new THREE.Mesh(
+        new THREE.CircleGeometry(1.4, 64),
+        new THREE.MeshBasicMaterial({ color: 0x07111f, transparent: true, opacity: 0.7 }),
+      ),
+    );
+    floorDisc.position.y = -2.11;
+    floorDisc.rotation.x = -Math.PI / 2;
+    figure.add(floorDisc);
+
+    const particleGroup = new THREE.Group();
+    figure.add(particleGroup);
+    const particleGeom = new THREE.SphereGeometry(0.022, 8, 8);
+    const particles: Array<{ mesh: THREE.Mesh; radius: number; speed: number; offset: number; y: number }> = [];
+    for (let i = 0; i < 28; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? 0x67e8f9 : 0x60a5fa,
+        transparent: true,
+        opacity: 0.55,
+      });
+      const mesh = new THREE.Mesh(particleGeom, mat);
+      const radius = 1.55 + Math.random() * 0.7;
+      const speed = 0.35 + Math.random() * 0.55;
+      const offset = Math.random() * Math.PI * 2;
+      const y = -1.6 + Math.random() * 3.6;
+      mesh.position.set(Math.cos(offset) * radius, y, Math.sin(offset) * radius);
+      particleGroup.add(mesh);
+      particles.push({ mesh, radius, speed, offset, y });
+      disposables.push({ geometry: particleGeom, material: mat });
+    }
+
+    figure.position.y = 0.4;
     scene.add(figure);
+    morphPartsRef.current = { chest, abdomen, hipBlock, figure };
 
+    const clock = new THREE.Clock();
+    let baseRotation = 0;
     let animationId = 0;
+
     const render = () => {
       animationId = window.requestAnimationFrame(render);
-      figure.rotation.y += 0.006;
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = clock.getElapsedTime();
+
+      baseRotation += dt * 0.32;
+      figure.rotation.y = baseRotation + Math.sin(t * 0.6) * 0.08;
+
+      const breath = 1 + Math.sin(t * 1.2) * 0.014;
+      torso.scale.set(breath, 1, breath);
+
+      upperBody.rotation.z = Math.sin(t * 0.8) * 0.02;
+      head.rotation.y = Math.sin(t * 0.5) * 0.08;
+
+      const cur = currentMorphRef.current;
+      const tgt = targetMorphRef.current;
+      const lerp = 1 - Math.pow(0.0008, dt);
+      cur.shoulder += (tgt.shoulder - cur.shoulder) * lerp;
+      cur.waist += (tgt.waist - cur.waist) * lerp;
+      cur.hip += (tgt.hip - cur.hip) * lerp;
+      cur.height += (tgt.height - cur.height) * lerp;
+      chest.scale.set(cur.shoulder, 1, cur.shoulder * 0.78);
+      abdomen.scale.set(cur.waist, 1, cur.waist * 0.78);
+      hipBlock.scale.set(cur.hip * 1.05, 1, cur.hip * 0.85);
+      figure.scale.y = cur.height;
+
+      const intensity = activityIntensityRef.current;
+      const pulse = 0.85 + Math.sin(t * 2.2) * 0.15;
+      muscleRefs.current.forEach((zone, i) => {
+        const mat = zone.material as THREE.MeshStandardMaterial;
+        mat.emissiveIntensity = intensity * pulse * (1 + i * 0.04);
+        mat.opacity = 0.55 + intensity * 0.4;
+      });
+
+      particles.forEach((p) => {
+        const angle = p.offset + t * p.speed;
+        p.mesh.position.x = Math.cos(angle) * p.radius;
+        p.mesh.position.z = Math.sin(angle) * p.radius;
+        p.mesh.position.y = p.y + Math.sin(t * 1.2 + p.offset) * 0.06;
+      });
+      particleGroup.rotation.y = -baseRotation;
+
       renderer.render(scene, camera);
     };
 
@@ -201,41 +447,49 @@ function AvatarCanvas({
     return () => {
       window.cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
-      host.removeChild(renderer.domElement);
+      if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
       renderer.dispose();
-      [torso, head, leftArm, rightArm, leftLeg, rightLeg, base, ...muscleRefs.current].forEach((mesh) => {
-        mesh.geometry.dispose();
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach((material) => material.dispose());
-        } else {
-          mesh.material.dispose();
+      const seenGeom = new Set<THREE.BufferGeometry>();
+      const seenMat = new Set<THREE.Material>();
+      const disposeMat = (m: THREE.Material) => {
+        if (seenMat.has(m)) return;
+        seenMat.add(m);
+        m.dispose();
+      };
+      disposables.forEach(({ geometry, material }) => {
+        if (!seenGeom.has(geometry)) {
+          seenGeom.add(geometry);
+          geometry.dispose();
         }
+        if (Array.isArray(material)) material.forEach(disposeMat);
+        else disposeMat(material);
       });
+      disposeMat(skinMaterial);
+      disposeMat(trimMaterial);
+      disposeMat(muscleMaterialBase);
+      morphPartsRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const scaleByCategory: Record<BmiCategory, [number, number, number]> = {
-      slim: [0.78, 1.06, 0.78],
-      athletic: [0.96, 1.02, 0.92],
-      average: [1.12, 0.98, 1.08],
-      heavier: [1.34, 0.94, 1.24],
+    const morphByCategory: Record<BmiCategory, { shoulder: number; waist: number; hip: number; height: number }> = {
+      slim: { shoulder: 0.92, waist: 0.78, hip: 0.88, height: 1.04 },
+      athletic: { shoulder: 1.06, waist: 0.88, hip: 0.94, height: 1.0 },
+      average: { shoulder: 1.04, waist: 1.06, hip: 1.04, height: 0.98 },
+      heavier: { shoulder: 1.16, waist: 1.32, hip: 1.22, height: 0.94 },
+    };
+    const m = morphByCategory[category];
+    const genderShoulder = gender === 'male' ? 1.06 : 0.94;
+    const genderHip = gender === 'male' ? 0.96 : 1.1;
+    targetMorphRef.current = {
+      shoulder: m.shoulder * genderShoulder,
+      waist: m.waist,
+      hip: m.hip * genderHip,
+      height: m.height,
     };
 
-    const target = scaleByCategory[category];
-    if (figureRef.current) {
-      figureRef.current.scale.set(...target);
-    }
-
-    const activityIntensity = Math.min(1, Math.max(0.24, (activityFactor - 1.15) / 0.58));
-    muscleRefs.current.forEach((zone, index) => {
-      const material = zone.material as THREE.MeshStandardMaterial;
-      material.emissiveIntensity = activityIntensity * (1 + index * 0.12);
-      material.opacity = 0.55 + activityIntensity * 0.4;
-      material.transparent = true;
-      zone.scale.z = 0.035 + activityIntensity * 0.025;
-    });
-  }, [activityFactor, category, bmi]);
+    activityIntensityRef.current = Math.min(1, Math.max(0.24, (activityFactor - 1.15) / 0.58));
+  }, [activityFactor, category, bmi, gender]);
 
   return (
     <div className="relative h-[360px] overflow-hidden rounded-[2rem] border border-cyan-300/10 bg-[#06101f]/80 sm:h-[500px]">
@@ -510,6 +764,7 @@ function App() {
                 activityFactor={activeLevel.factor}
                 bmi={calculations.bmi}
                 category={calculations.category}
+                gender={state.gender}
               />
               <div className="glass-panel rounded-[2rem] p-5">
                 <p className="text-sm uppercase tracking-[0.24em] text-cyan-200/80">Avatar signal</p>
